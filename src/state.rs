@@ -1,5 +1,6 @@
 use crate::message::Message;
 use crate::ui::{launcher_view, settings_view};
+use crate::config::Config;
 use iced::{Application, Command, Element, Theme};
 
 use std::ffi::OsStr;
@@ -15,17 +16,20 @@ pub struct AppInfo {
     pub icon: Option<String>,
 }
 
-fn resolve_icon(name: &str) -> Option<String> {
+fn resolve_icon(name: &str, theme: Option<&str>) -> Option<String> {
     let path = Path::new(name);
     if path.is_absolute() && path.exists() {
         return Some(path.to_string_lossy().into_owned());
     }
 
-    let search_dirs = vec![
-        dirs::data_dir().unwrap_or_default().join("icons"),
-        PathBuf::from("/usr/share/icons"),
-        PathBuf::from("/usr/share/pixmaps"),
-    ];
+    let mut search_dirs = Vec::new();
+    if let Some(t) = theme {
+        search_dirs.push(dirs::data_dir().unwrap_or_default().join("icons").join(t));
+        search_dirs.push(PathBuf::from(format!("/usr/share/icons/{}", t)));
+    }
+    search_dirs.push(dirs::data_dir().unwrap_or_default().join("icons"));
+    search_dirs.push(PathBuf::from("/usr/share/icons"));
+    search_dirs.push(PathBuf::from("/usr/share/pixmaps"));
 
     let extensions = ["png", "svg", "xpm"];
 
@@ -51,10 +55,11 @@ fn resolve_icon(name: &str) -> Option<String> {
 pub struct Dashboard {
     pub show_settings: bool,
     pub applications: Vec<AppInfo>,
+    pub config: Config,
 }
 
 impl Dashboard {
-    fn find_applications() -> Vec<AppInfo> {
+    fn find_applications(icon_theme: Option<&str>) -> Vec<AppInfo> {
         let mut apps = Vec::new();
         let paths = vec![
             dirs::data_dir().unwrap_or_default().join("applications"),
@@ -96,7 +101,7 @@ impl Dashboard {
                                         None
                                     }
                                 })
-                                .and_then(|n| resolve_icon(&n));
+                                .and_then(|n| resolve_icon(&n, icon_theme));
 
                             if let (Some(name), Some(exec)) = (name, exec) {
                                 apps.push(AppInfo { name, exec, icon });
@@ -114,10 +119,20 @@ impl Dashboard {
 
 impl Default for Dashboard {
     fn default() -> Self {
-        let apps = Self::find_applications();
+        let config_path = dirs::config_dir()
+            .unwrap_or_default()
+            .join("hyprdashboard")
+            .join("config.toml");
+        let config = if let Ok(content) = fs::read_to_string(config_path) {
+            toml::from_str(&content).unwrap_or_default()
+        } else {
+            Config::default()
+        };
+        let apps = Self::find_applications(config.icon_theme.as_deref());
         Self {
             show_settings: false,
             applications: apps,
+            config,
         }
     }
 }

@@ -7,3 +7,5 @@ edition = "2021"
 dirs = "6.0.0"
 iced = { version = "0.12", features = ["lazy", "image", "svg"] }
 walkdir = "2"
+serde = { version = "1", features = ["derive"] }
+toml = "0.7"
