@@ -9,6 +9,7 @@ use std::path::Path;
 pub struct AppInfo {
     pub name: String,
     pub exec: String,
+    pub icon: Option<String>,
 }
 
 pub struct Dashboard {
@@ -49,8 +50,16 @@ impl Dashboard {
                             }
                         });
 
+                        let icon = content.lines().find_map(|line| {
+                            if line.starts_with("Icon=") {
+                                Some(line.trim_start_matches("Icon=").to_string())
+                            } else {
+                                None
+                            }
+                        });
+
                         if let (Some(name), Some(exec)) = (name, exec) {
-                            apps.push(AppInfo { name, exec });
+                            apps.push(AppInfo { name, exec, icon });
                         }
                     }
                 }
