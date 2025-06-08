@@ -4,13 +4,48 @@ use iced::{Application, Command, Element, Theme};
 
 use std::ffi::OsStr;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+use walkdir::WalkDir;
 
 #[derive(Debug)]
 pub struct AppInfo {
     pub name: String,
     pub exec: String,
     pub icon: Option<String>,
+}
+
+fn resolve_icon(name: &str) -> Option<String> {
+    let path = Path::new(name);
+    if path.is_absolute() && path.exists() {
+        return Some(path.to_string_lossy().into_owned());
+    }
+
+    let search_dirs = vec![
+        dirs::data_dir().unwrap_or_default().join("icons"),
+        PathBuf::from("/usr/share/icons"),
+        PathBuf::from("/usr/share/pixmaps"),
+    ];
+
+    let extensions = ["png", "svg", "xpm"];
+
+    for dir in search_dirs {
+        for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
+            if entry.file_type().is_file() {
+                if let Some(stem) = entry.path().file_stem() {
+                    if stem == name {
+                        if let Some(ext) = entry.path().extension() {
+                            if extensions.contains(&ext.to_string_lossy().as_ref()) {
+                                return Some(entry.path().to_string_lossy().into_owned());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }
 
 pub struct Dashboard {
@@ -52,13 +87,16 @@ impl Dashboard {
                                 }
                             });
 
-                            let icon = content.lines().find_map(|line| {
-                                if line.starts_with("Icon=") {
-                                    Some(line.trim_start_matches("Icon=").to_string())
-                                } else {
-                                    None
-                                }
-                            });
+                            let icon = content
+                                .lines()
+                                .find_map(|line| {
+                                    if line.starts_with("Icon=") {
+                                        Some(line.trim_start_matches("Icon=").to_string())
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .and_then(|n| resolve_icon(&n));
 
                             if let (Some(name), Some(exec)) = (name, exec) {
                                 apps.push(AppInfo { name, exec, icon });
