@@ -1,13 +1,6 @@
 # hyprdashboard
 A dashboard for Hyprland
 
-## Configuration
+## Icon Lookup
 
-`hyprdashboard` looks for `~/.config/hyprdashboard/config.toml` on start. The file is optional and can contain the following field:
-
-```toml
-# Theme name used when searching for application icons
-icon_theme = "Adwaita"
-```
-
-If the file is missing or `icon_theme` is not provided, system icons will be searched without a specific theme.
+Icons are now located following the freedesktop.org Icon Theme Specification. The search uses directories from `$XDG_DATA_HOME` and each path listed in `$XDG_DATA_DIRS`. For the current theme (read from `$XDG_ICON_THEME` and falling back to `hicolor`) each `index.theme` file is parsed to discover subdirectories and inherited themes. Resolution specific directories are respected and fall back to `hicolor` if the icon is not found.

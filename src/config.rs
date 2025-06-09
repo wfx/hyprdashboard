@@ -1,6 +1,6 @@
-use serde::Deserialize;
+// use serde::Deserialize;
 
-#[derive(Debug, Default, Deserialize)]
-pub struct Config {
-    pub icon_theme: Option<String>,
-}
+// #[derive(Debug, Default, Deserialize)]
+// pub struct Config {
+//     pub icon_theme: Option<String>,
+// }
