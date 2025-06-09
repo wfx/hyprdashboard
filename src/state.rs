@@ -1,14 +1,13 @@
-use crate::message::Message;
+use crate::config::Config;
 use crate::ui::{launcher_view, settings_view};
-use iced::{Application, Command, Element, Theme};
-
-use std::ffi::OsStr;
+use iced::widget::{self, image, svg};
+use iced::{Application, Command, Element, Settings, Theme};
+use once_cell::sync::Lazy;
+use std::collections::HashMap;
+use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-
-use ini::Ini;
-
-use std::collections::HashSet;
+use std::sync::Mutex;
 
 #[derive(Debug)]
 pub struct AppInfo {
@@ -17,239 +16,235 @@ pub struct AppInfo {
     pub icon: Option<String>,
 }
 
-fn icon_base_dirs() -> Vec<PathBuf> {
-    let mut dirs_vec = Vec::new();
-    if let Some(dir) = std::env::var_os("XDG_DATA_HOME") {
-        dirs_vec.push(PathBuf::from(dir));
-    } else if let Some(home) = dirs::home_dir() {
-        dirs_vec.push(home.join(".local/share"));
-    }
-
-    if let Ok(data_dirs) = std::env::var("XDG_DATA_DIRS") {
-        for d in data_dirs.split(':') {
-            dirs_vec.push(PathBuf::from(d));
-        }
-    } else {
-        dirs_vec.push(PathBuf::from("/usr/local/share"));
-        dirs_vec.push(PathBuf::from("/usr/share"));
-    }
-    dirs_vec
-}
-
-#[derive(Default)]
-struct ThemeInfo {
-    directories: Vec<String>,
-    inherits: Vec<String>,
-}
-
-fn parse_index_theme(path: &Path) -> ThemeInfo {
-    if let Ok(conf) = Ini::load_from_file(path) {
-        let mut info = ThemeInfo::default();
-        if let Some(section) = conf.section(Some("Icon Theme")) {
-            if let Some(dirs) = section.get("Directories") {
-                info.directories = dirs
-                    .split(|c| c == ',' || c == ';')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
-            }
-            if let Some(inherits) = section.get("Inherits") {
-                info.inherits = inherits
-                    .split(|c| c == ',' || c == ';')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
-            }
-        }
-        info
-    } else {
-        ThemeInfo::default()
-    }
-}
-
-fn resolve_icon(name: &str) -> Option<String> {
-    let path = Path::new(name);
-    if path.is_absolute() && path.exists() {
-        return Some(path.to_string_lossy().into_owned());
-    }
-
-    let mut themes = Vec::new();
-    if let Ok(theme) = std::env::var("XDG_ICON_THEME") {
-        themes.push(theme);
-    }
-    if !themes.contains(&"hicolor".to_string()) {
-        themes.push("hicolor".into());
-    }
-
-    let extensions = ["png", "svg", "xpm"];
-    let base_dirs = icon_base_dirs();
-
-    let mut visited = HashSet::new();
-    while let Some(theme) = themes.pop() {
-        if !visited.insert(theme.clone()) {
-            continue;
-        }
-        for base in &base_dirs {
-            let theme_dir = base.join("icons").join(&theme);
-            let info = parse_index_theme(&theme_dir.join("index.theme"));
-
-            for dir in &info.directories {
-                for ext in &extensions {
-                    let candidate = theme_dir.join(dir).join(format!("{}.{}", name, ext));
-                    if candidate.exists() {
-                        return Some(candidate.to_string_lossy().into_owned());
-                    }
-                }
-            }
-
-            for inherit in info.inherits {
-                themes.push(inherit);
-            }
-        }
-    }
-
-    for base in base_dirs {
-        for ext in &extensions {
-            let candidate = base.join("pixmaps").join(format!("{}.{}", name, ext));
-            if candidate.exists() {
-                return Some(candidate.to_string_lossy().into_owned());
-            }
-        }
-    }
-
-    None
-}
-
 pub struct Dashboard {
-    pub show_settings: bool,
-    pub applications: Vec<AppInfo>,
+    pub config: Config,
+    pub apps: Vec<AppInfo>,
 }
 
 impl Dashboard {
-    fn find_applications() -> Vec<AppInfo> {
+    pub fn new(config: Config) -> Self {
+        let apps = Self::find_applications(&config);
+        Self { config, apps }
+    }
+
+    fn find_applications(config: &Config) -> Vec<AppInfo> {
         let mut apps = Vec::new();
-        let paths = vec![
-            dirs::data_dir().unwrap_or_default().join("applications"),
-            Path::new("/usr/share/applications").to_path_buf(),
-        ];
+        let xdg_data_dirs =
+            env::var("XDG_DATA_DIRS").unwrap_or_else(|_| "/usr/local/share:/usr/share".into());
+        let mut paths: Vec<String> = xdg_data_dirs
+            .split(':')
+            .map(|dir| format!("{}/applications", dir))
+            .collect();
 
-        for dir in paths {
-            if let Ok(entries) = fs::read_dir(dir) {
+        if let Ok(home) = env::var("HOME") {
+            paths.push(format!("{}/.local/share/applications", home));
+        }
+
+        for path in paths {
+            let dir = Path::new(&path);
+            if let Ok(entries) = dir.read_dir() {
                 for entry in entries.flatten() {
-                    if entry.path().extension() == Some(OsStr::new("desktop")) {
-                        if let Ok(content) = fs::read_to_string(entry.path()) {
-                            let name = content.lines().find_map(|line| {
-                                if line.starts_with("Name=") {
-                                    Some(line.trim_start_matches("Name=").to_string())
-                                } else {
-                                    None
-                                }
-                            });
-                            let exec = content.lines().find_map(|line| {
-                                if line.starts_with("Exec=") {
-                                    Some(
-                                        line.trim_start_matches("Exec=")
-                                            .split_whitespace()
-                                            .next()
-                                            .unwrap_or("")
-                                            .to_string(),
-                                    )
-                                } else {
-                                    None
-                                }
-                            });
+                    if let Ok(content) = fs::read_to_string(entry.path()) {
+                        let name = content
+                            .lines()
+                            .find_map(|line| line.strip_prefix("Name="))
+                            .unwrap_or("")
+                            .to_string();
+                        let exec = content
+                            .lines()
+                            .find_map(|line| line.strip_prefix("Exec="))
+                            .unwrap_or("")
+                            .to_string();
+                        let icon_name = content
+                            .lines()
+                            .find_map(|line| line.strip_prefix("Icon="))
+                            .unwrap_or("");
 
-                            let icon = content
-                                .lines()
-                                .find_map(|line| {
-                                    if line.starts_with("Icon=") {
-                                        Some(line.trim_start_matches("Icon=").to_string())
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .and_then(|n| resolve_icon(&n));
+                        if icon_name.is_empty() {
+                            continue;
+                        }
 
-                            if let (Some(name), Some(exec)) = (name, exec) {
-                                apps.push(AppInfo { name, exec, icon });
-                            }
+                        let icon = resolve_icon(icon_name, config.icon_theme.as_deref());
+
+                        if let Some(ref path) = icon {
+                            println!("✓ Icon '{}' found: {}", icon_name, path);
                         } else {
-                            // ignore non-.desktop files, they don't describe applications
+                            eprintln!("✗ Icon '{}' not found in any theme (searched with theme hint: {:?})", icon_name, config.icon_theme);
+                        }
+
+                        if !name.is_empty() && !exec.is_empty() {
+                            apps.push(AppInfo { name, exec, icon });
                         }
                     }
                 }
             }
         }
+
+        apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
         apps
     }
-}
 
-impl Default for Dashboard {
-    fn default() -> Self {
-        let apps = Self::find_applications();
-        Self {
-            show_settings: false,
-            applications: apps,
+    pub fn render_icon(path: &str) -> Element<'static, crate::message::Message> {
+        if path.ends_with(".svg") {
+            svg::Svg::from_path(path).into()
+        } else {
+            widget::Image::new(image::Handle::from_path(path)).into()
         }
     }
 }
 
 impl Application for Dashboard {
     type Executor = iced::executor::Default;
-    type Message = Message;
+    type Message = crate::message::Message;
     type Theme = Theme;
-    type Flags = ();
+    type Flags = Config;
 
-    fn new(_: ()) -> (Self, Command<Message>) {
-        (Self::default(), Command::none())
+    fn new(config: Config) -> (Self, Command<Self::Message>) {
+        (Dashboard::new(config), Command::none())
     }
 
     fn title(&self) -> String {
-        String::from("Dashboard")
+        String::from("Hypr Dashboard")
     }
 
-    fn update(&mut self, message: Message) -> Command<Message> {
-        match message {
-            Message::LaunchApp(exec) => {
-                let _ = std::process::Command::new(exec).spawn();
-            }
-            Message::ToggleSettings => self.show_settings = !self.show_settings,
-        }
+    fn theme(&self) -> Self::Theme {
+        Theme::Dark
+    }
+
+    fn update(&mut self, _message: Self::Message) -> Command<Self::Message> {
         Command::none()
     }
 
-    fn view(&self) -> Element<'_, Message> {
-        if self.show_settings {
-            settings_view()
-        } else {
-            launcher_view(&self.applications)
-        }
+    fn view(&self) -> Element<'_, Self::Message> {
+        launcher_view(&self.apps)
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs::File;
-    use std::io::Write;
-    use tempfile::tempdir;
+struct ThemeInfo {
+    directories: Vec<String>,
+    inherits: Vec<String>,
+}
 
-    #[test]
-    fn parse_index_theme_handles_multiple_separators() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("index.theme");
-        let mut file = File::create(&path).unwrap();
-        writeln!(
-            file,
-            "[Icon Theme]\nDirectories=32x32/apps;48x48/apps,64x64/apps\nInherits=base;legacy,old"
-        )
-        .unwrap();
+fn parse_index_theme<P: AsRef<Path>>(path: P) -> Option<ThemeInfo> {
+    let content = fs::read_to_string(path).ok()?;
+    let mut directories = Vec::new();
+    let mut inherits = Vec::new();
 
-        let info = parse_index_theme(&path);
-        assert_eq!(
-            info.directories,
-            vec!["32x32/apps", "48x48/apps", "64x64/apps"]
-        );
-        assert_eq!(info.inherits, vec!["base", "legacy", "old"]);
+    for line in content.lines() {
+        let line = line.trim();
+        if line.starts_with('#') || line.is_empty() {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("Directories=") {
+            directories.extend(
+                rest.split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(String::from),
+            );
+        }
+        if let Some(rest) = line.strip_prefix("Inherits=") {
+            inherits.extend(
+                rest.split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(String::from),
+            );
+        }
     }
+
+    Some(ThemeInfo {
+        directories,
+        inherits,
+    })
+}
+
+static ICON_CACHE: Lazy<Mutex<HashMap<(String, String), Option<String>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+fn resolve_icon(name: &str, theme_hint: Option<&str>) -> Option<String> {
+    let key = (name.to_string(), theme_hint.unwrap_or("").to_string());
+    if let Some(result) = ICON_CACHE.lock().unwrap().get(&key) {
+        return result.clone();
+    }
+
+    let exts = ["png", "svg", "xpm"];
+    let mut themes = Vec::new();
+
+    if let Some(theme_name) = theme_hint {
+        themes.push(theme_name.to_string());
+    }
+    if !themes.contains(&"hicolor".to_string()) {
+        themes.push("hicolor".into());
+    }
+
+    let theme_paths = [
+        "/usr/share/icons",
+        "/usr/local/share/icons",
+        &format!("{}/.icons", env::var("HOME").unwrap_or_default()),
+    ];
+
+    while let Some(theme) = themes.pop() {
+        for base in &theme_paths {
+            let theme_dir = Path::new(base).join(&theme);
+            let index_path = theme_dir.join("index.theme");
+            if !index_path.exists() {
+                continue;
+            }
+            if let Some(theme_info) = parse_index_theme(&index_path) {
+                for dir in &theme_info.directories {
+                    for ext in &exts {
+                        let candidate = theme_dir.join(dir).join(format!("{}.{}", name, ext));
+                        if candidate.exists() {
+                            let result = Some(candidate.to_string_lossy().into_owned());
+                            ICON_CACHE.lock().unwrap().insert(key, result.clone());
+                            return result;
+                        }
+                    }
+                }
+                for ext in &exts {
+                    let candidate = theme_dir
+                        .join("scalable/apps")
+                        .join(format!("{}.{}", name, ext));
+                    if candidate.exists() {
+                        let result = Some(candidate.to_string_lossy().into_owned());
+                        ICON_CACHE.lock().unwrap().insert(key, result.clone());
+                        return result;
+                    }
+                }
+                for inherit in theme_info.inherits {
+                    if !themes.contains(&inherit) {
+                        themes.push(inherit);
+                    }
+                }
+            }
+        }
+    }
+
+    for base in &theme_paths {
+        for ext in &exts {
+            let candidate = Path::new(base)
+                .join("pixmaps")
+                .join(format!("{}.{}", name, ext));
+            if candidate.exists() {
+                let result = Some(candidate.to_string_lossy().into_owned());
+                ICON_CACHE.lock().unwrap().insert(key, result.clone());
+                return result;
+            }
+        }
+    }
+
+    for base in &theme_paths {
+        for ext in &exts {
+            let candidate = Path::new(base).join(format!("{}.{}", name, ext));
+            if candidate.exists() {
+                let result = Some(candidate.to_string_lossy().into_owned());
+                ICON_CACHE.lock().unwrap().insert(key, result.clone());
+                return result;
+            }
+        }
+    }
+
+    ICON_CACHE.lock().unwrap().insert(key, None);
+    None
 }

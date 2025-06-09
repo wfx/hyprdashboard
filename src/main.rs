@@ -1,11 +1,19 @@
+mod config;
 mod message;
 mod state;
 mod ui;
-mod config;
 
-use iced::Application;
+use config::Config;
+use iced::{Application, Settings};
 use state::Dashboard;
+use std::path::PathBuf;
 
-pub fn main() -> iced::Result {
-    Dashboard::run(Default::default())
+fn main() -> iced::Result {
+    let path = dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("hyprdashboard/config.toml");
+
+    let config = Config::load_from_file(path.to_str().unwrap_or("config.toml"));
+    println!("▶ Loaded config: {:?}", config);
+    Dashboard::run(Settings::with_flags(config))
 }
