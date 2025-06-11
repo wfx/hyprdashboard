@@ -2,6 +2,7 @@ use crate::config::Config;
 use crate::ui::{launcher_view, settings_view};
 use iced::widget::{image, svg};
 use iced::{Application, Command, Element, Theme};
+use ini::Ini;
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::env;
@@ -136,32 +137,26 @@ struct ThemeInfo {
 }
 
 fn parse_index_theme<P: AsRef<Path>>(path: P) -> Option<ThemeInfo> {
-    let content = fs::read_to_string(path).ok()?;
-    let mut directories = Vec::new();
-    let mut inherits = Vec::new();
+    let ini = Ini::load_from_file(path).ok()?;
+    let section = ini.section(Some("Icon Theme"))?;
 
-    for line in content.lines() {
-        let line = line.trim();
-        if line.starts_with('#') || line.is_empty() {
-            continue;
-        }
-        if let Some(rest) = line.strip_prefix("Directories=") {
-            directories.extend(
-                rest.split(',')
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .map(String::from),
-            );
-        }
-        if let Some(rest) = line.strip_prefix("Inherits=") {
-            inherits.extend(
-                rest.split(',')
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .map(String::from),
-            );
-        }
-    }
+    let directories = section
+        .get("Directories")
+        .unwrap_or("")
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .collect();
+
+    let inherits = section
+        .get("Inherits")
+        .unwrap_or("")
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .collect();
 
     Some(ThemeInfo {
         directories,
@@ -257,4 +252,37 @@ fn resolve_icon(name: &str, theme_hint: Option<&str>) -> Option<String> {
 
     ICON_CACHE.lock().unwrap().insert(key, None);
     None
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn parses_directories_and_inherits() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            "[Icon Theme]\nDirectories=16x16/apps,32x32/apps\nInherits=hicolor,Adwaita\n\n[16x16/apps]\nSize=16"
+        )
+        .unwrap();
+
+        let info = parse_index_theme(file.path()).unwrap();
+        assert_eq!(info.directories, vec!["16x16/apps", "32x32/apps"]);
+        assert_eq!(info.inherits, vec!["hicolor", "Adwaita"]);
+    }
+
+    #[test]
+    fn ignores_other_sections() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            "[Icon Theme]\nDirectories=apps\n\n[Other]\nDirectories=ignored"
+        )
+        .unwrap();
+
+        let info = parse_index_theme(file.path()).unwrap();
+        assert_eq!(info.directories, vec!["apps"]);
+    }
 }
