@@ -19,12 +19,17 @@ pub struct AppInfo {
 pub struct Dashboard {
     pub config: Config,
     pub apps: Vec<AppInfo>,
+    pub show_settings: bool,
 }
 
 impl Dashboard {
     pub fn new(config: Config) -> Self {
         let apps = Self::find_applications(&config);
-        Self { config, apps }
+        Self {
+            config,
+            apps,
+            show_settings: false,
+        }
     }
 
     fn find_applications(config: &Config) -> Vec<AppInfo> {
@@ -103,12 +108,29 @@ impl Application for Dashboard {
         Theme::GruvboxLight
     }
 
-    fn update(&mut self, _message: Self::Message) -> Command<Self::Message> {
-        Command::none()
+    fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
+        match message {
+            crate::message::Message::LaunchApp(cmd) => {
+                if !cmd.is_empty() {
+                    if let Err(e) = std::process::Command::new("sh").arg("-c").arg(&cmd).spawn() {
+                        eprintln!("failed to launch {}: {}", cmd, e);
+                    }
+                }
+                Command::none()
+            }
+            crate::message::Message::ToggleSettings => {
+                self.show_settings = !self.show_settings;
+                Command::none()
+            }
+        }
     }
 
     fn view(&self) -> Element<'_, Self::Message> {
-        launcher_view(&self.apps)
+        if self.show_settings {
+            settings_view()
+        } else {
+            launcher_view(&self.apps)
+        }
     }
 }
 
