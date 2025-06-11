@@ -1,7 +1,7 @@
 use crate::message::Message;
 use crate::state::AppInfo;
 use iced::alignment::Horizontal;
-use iced::widget::{button, column, container, image, row, scrollable, text};
+use iced::widget::{button, column, container, image, row, scrollable, svg, text};
 use iced::{Element, Length};
 
 pub fn launcher_view(apps: &[AppInfo]) -> Element<'static, Message> {
@@ -28,11 +28,15 @@ pub fn launcher_view(apps: &[AppInfo]) -> Element<'static, Message> {
     for app in apps {
         let mut btn_content = column![];
         if let Some(icon) = &app.icon {
-            btn_content = btn_content.push(
-                image(icon.clone())
+            let icon_widget: Element<'static, Message> = if icon.ends_with(".svg") {
+                svg::Svg::from_path(icon).width(64).height(64).into()
+            } else {
+                iced::widget::Image::new(image::Handle::from_path(icon))
                     .width(64)
-                    .height(64),
-            );
+                    .height(64)
+                    .into()
+            };
+            btn_content = btn_content.push(icon_widget);
         }
         btn_content = btn_content.push(text(&app.name));
         row_view = row_view.push(

@@ -83,14 +83,6 @@ impl Dashboard {
         apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
         apps
     }
-
-    pub fn render_icon(path: &str) -> Element<'static, crate::message::Message> {
-        if path.ends_with(".svg") {
-            svg::Svg::from_path(path).into()
-        } else {
-            widget::Image::new(image::Handle::from_path(path)).into()
-        }
-    }
 }
 
 impl Application for Dashboard {
@@ -108,7 +100,7 @@ impl Application for Dashboard {
     }
 
     fn theme(&self) -> Self::Theme {
-        Theme::Dark
+        Theme::GruvboxLight
     }
 
     fn update(&mut self, _message: Self::Message) -> Command<Self::Message> {
