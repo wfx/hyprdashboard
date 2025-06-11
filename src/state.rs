@@ -1,13 +1,14 @@
 use crate::config::Config;
 use crate::ui::{launcher_view, settings_view};
-use iced::widget::{self, image, svg};
-use iced::{Application, Command, Element, Settings, Theme};
+use iced::widget::{image, svg};
+use iced::{Application, Command, Element, Theme};
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use xdg::BaseDirectories;
 
 #[derive(Debug)]
 pub struct AppInfo {
@@ -34,19 +35,14 @@ impl Dashboard {
 
     fn find_applications(config: &Config) -> Vec<AppInfo> {
         let mut apps = Vec::new();
-        let xdg_data_dirs =
-            env::var("XDG_DATA_DIRS").unwrap_or_else(|_| "/usr/local/share:/usr/share".into());
-        let mut paths: Vec<String> = xdg_data_dirs
-            .split(':')
-            .map(|dir| format!("{}/applications", dir))
-            .collect();
+        let xdg_dirs = BaseDirectories::new().unwrap();
 
-        if let Ok(home) = env::var("HOME") {
-            paths.push(format!("{}/.local/share/applications", home));
-        }
+        let mut paths: Vec<PathBuf> = Vec::new();
+        paths.push(xdg_dirs.get_data_home());
+        paths.extend(xdg_dirs.get_data_dirs());
 
-        for path in paths {
-            let dir = Path::new(&path);
+        for base in paths {
+            let dir = base.join("applications");
             if let Ok(entries) = dir.read_dir() {
                 for entry in entries.flatten() {
                     if let Ok(content) = fs::read_to_string(entry.path()) {
@@ -72,7 +68,7 @@ impl Dashboard {
                         let icon = resolve_icon(icon_name, config.icon_theme.as_deref());
 
                         if let Some(ref path) = icon {
-                            println!("✓ Icon '{}' found: {}", icon_name, path);
+                            eprintln!("✓ Icon '{}' found: {}", icon_name, path);
                         } else {
                             eprintln!("✗ Icon '{}' not found in any theme (searched with theme hint: {:?})", icon_name, config.icon_theme);
                         }
