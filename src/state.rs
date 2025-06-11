@@ -68,9 +68,9 @@ impl Dashboard {
                         let icon = resolve_icon(icon_name, config.icon_theme.as_deref());
 
                         if let Some(ref path) = icon {
-                            eprintln!("✓ Icon '{}' found: {}", icon_name, path);
+                            log::info!("✓ Icon '{}' found: {}", icon_name, path);
                         } else {
-                            eprintln!("✗ Icon '{}' not found in any theme (searched with theme hint: {:?})", icon_name, config.icon_theme);
+                            log::error!("✗ Icon '{}' not found in any theme (searched with theme hint: {:?})", icon_name, config.icon_theme);
                         }
 
                         if !name.is_empty() && !exec.is_empty() {
@@ -109,7 +109,7 @@ impl Application for Dashboard {
             crate::message::Message::LaunchApp(cmd) => {
                 if !cmd.is_empty() {
                     if let Err(e) = std::process::Command::new("sh").arg("-c").arg(&cmd).spawn() {
-                        eprintln!("failed to launch {}: {}", cmd, e);
+                        log::error!("failed to launch {}: {}", cmd, e);
                     }
                 }
                 Command::none()
